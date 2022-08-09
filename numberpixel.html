@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ナンバーぬりえ</title>
+<script>
+let canvas, context, palette;                   //キャンバス
+let miniCanvas, miniContext;                    //縮小用キャンバス
+const image = new Image();                      //画像
+let pixel = new Array();                        //マスのデータ
+let colors = new Array();                       //色のデータ（色）
+let numColors = new Array();                    //色のデータ（マス数）
+let index = -1, cnt = 0;                        //選択した色のインデックス、塗ったマスの数
+let mouseDown = false;                          //マウスボタンが押されたか
+
+const init = () => {
+    //キャンバス、パレットの取得
+    canvas = document.getElementById("image");          //メインキャンバスを取得
+    context = canvas.getContext("2d");
+    miniCanvas = document.getElementById("mini");       //縮小用キャンバスを取得
+    miniContext = miniCanvas.getContext("2d");
+    palette = document.getElementById("palette");       //パレット表示エリアを取得
+    //マウスイベント
+    canvas.addEventListener("mousedown", event => {
+        if (image.src != "") mouseDown = true;
+        putColor(event);
+    });
+    canvas.addEventListener("mousemove", putColor);
+    canvas.addEventListener("mouseup", () => {mouseDown = false;});
+    canvas.addEventListener("mouseleave", () => {mouseDown = false;});
+    //「はじめから」ボタンの無効化
+    document.getElementById("reset").disabled = true;                   //はじめからボタンを無効化
+}
+
+const loadImage = files => {
+    //画像の読み込み
+    image.src = URL.createObjectURL(files[0]);                          //ファイルを選択ボタンで読み込んだ画像ファイル
+    image.onload = () => {
+        //塗り絵を作成
+        makePixel();
+        //はじめからボタンの有効化
+        document.getElementById("reset").disabled = false;
+    }
+}
+
+const makePixel = () => {
+    //画像を描画（600×600）
+    context.fillStyle = "#000000";                                      //メインキャンバスを黒で塗りつぶす
+    context.fillRect(0, 0, 600, 600);
+    let sx, sy, sw, sh;
+    if (image.width > image.height) {                                   //画像が横長のとき
+        [sw, sh] = [image.width, image.width];                          //画像の横幅を基準にする
+        [sx, sy] = [0, image.height/2 - sh/2];
+    } else {                                                            //画像が縦長のとき
+        [sw, sh] = [image.height, image.height];                        //画像の高さを基準にする
+        [sx, sy] = [image.width/2 - sh/2, 0];
+    }
+    context.drawImage(image, sx, sy, sw, sh, 0, 0, 600, 600);           //メインキャンバスに画像を表示
+    //マス（30×30)、パレットを作成
+    context.font = "12px sans-serif";
+    context.textAlign = "center";                                       //文字の基準位置、上下左右の中央に
+    context.textBaseline = "middle";
+    pixel = new Array(30);
+    palette.innerHTML = "";
+    colors = [];
+    numColors = [];
+    let id = 0;
+    for (let x=0; x<30; x++) {                                          //30x30マスを作るためのくり返し
+        pixel[x] = new Array(30);
+        for (let y=0; y<30; y++) {
+            //マスの色を取得
+            const [tx,ty] = [x*20, y*20];
+            const imageData = context.getImageData(tx, ty, 20, 20);     //メインキャンバスから20x20ピクセル分のデータを取得
+            let[r, g, b] = [0, 0, 0];
+            for (let i=0; i<imageData.data.length; i+=4) {              //RGBごとに20×20ぶんの色データを足す
+                r += imageData.data[i];
+                g += imageData.data[i+1];
+                b += imageData.data[i+2];
+            }
+            //平均値を減色
+            r = Math.floor(r/400/32) * 32 + 16;                         //色の平均値を求め、最大512色に減色する
+            g = Math.floor(g/400/32) * 32 + 16;
+            b = Math.floor(b/400/32) * 32 + 16;
+            const color = `rgb(${r}, ${g}, ${b})`;
+            if (colors.indexOf(color) == -1) {                           //これまで使用していない色なら
+                //パレットに色を追加
+                id++;
+                const button = document.createElement("button");        //ボタンを作成
+                button.id = `c_${id-1}`;
+                button.innerText = id;                                  //色の番号を表示
+                button.onclick = selectColor;
+                button.style.backgroundColor = color;                   //パレットの色をセット
+                if (0.299 * r + 0.587 * g + 0.114 * b < 100) {          //色の明るさが100以下なら文字の色を白にする
+                    button.style.color = "#FFFFFF";
+                }
+                palette.appendChild(button);                            //パレット表示エリアに追加
+                colors.push(color);
+                numColors[colors.indexOf(color)] = 0;
+            }
+            //マスを描画
+            context.fillStyle = "#FFFFFF";                              //マスを白で塗りつぶし、黒線で囲む
+            context.fillRect(tx, ty, 20, 20);
+            context.strokeRect(tx, ty, 20, 20);
+            context.fillStyle = "#000000";
+            context.fillText(colors.indexOf(color)+1, tx+10, ty+10)     //色番号を表示
+            pixel[x][y] = colors.indexOf(color);
+            numColors[colors.indexOf(color)]++;                         //同じ色番号の個数を数える
+        }
+    }
+    //初期化
+    document.getElementById("progress").value = 0;                      //プログレスバーを0にし、0％と表示
+    document.getElementById("per").innerText = 0;
+    miniContext.clearRect(0, 0, 60,60);
+    cnt = 0;
+    index = -1;
+}
+
+const selectColor = event => {                                          //パレットをクリックした時
+    //色の選択
+    if (index > -1) {                                                   //選択中の色があるとき
+        document.getElementById(`c_${index}`).classList.remove("select");
+    }
+    event.target.classList.add("select");
+    index = event.target.id.split("_")[1];                              //色番号をindexに保存
+}
+
+const putColor = event => {                                             //メインキャンバスをクリックまたはドラッグしたとき
+    //色を塗る
+    const rect = event.target.getBoundingClientRect();                  //マウスカーソルの座標から、マスの位置を計算
+    const x = Math.floor((event.clientX - rect.left)/20);
+    const y = Math.floor((event.clientY - rect.top)/20);
+    if ((mouseDown)&&(pixel[x][y] == index)) {                          //マスの番号が選択中の色番号と同じなら
+        context.fillStyle = colors[index];                              //色番号が表す色でマスを塗りつぶす
+        context.fillRect(x*20, y*20, 20, 20);
+        miniContext.fillStyle = colors[index];
+        miniContext.fillRect(x*2, y*2, 2, 2);                           //縮小用キャンバスにも色を塗る
+        pixel[x][y] = -2;
+        numColors[index]--;
+        cnt++;
+        per = Math.floor(cnt/900*100);                                  //塗りつぶしたマスの数をパーセントで計算
+        document.getElementById("progress").value = per;
+        document.getElementById("per").innerText = per;
+        if (numColors[index] == 0) {                                    //同じ色番号のマスをすべて塗りつぶしたとき
+            //パレットから色を削除
+            const button = document.getElementById(`c_${index}`);
+            palette.removeChild(button);                                //パレットからボタンを削除
+            index = -1;
+        }
+    }
+}
+</script>
+<style>
+canvas {border: thin solid #000000;}
+#main {width: 820px;}
+#image {
+    float: left;
+    margin-right: 10px;
+}
+#palette {overflow: auto;}
+button {
+    width: 40px;
+    height: 40px;
+}
+.select {border: thick double#FFFFFF;}
+</style>
+</head>
+<body onload="init()">
+<p>ナンバーぬりえ</p>
+<input type="button" id="reset" value="はじめから" onclick="makePixel()">
+<input type="file" accept="image/*" onchange="loadImage(this.files)">
+<hr>
+<div id="main">
+<canvas id="image" width="600" height="600"></canvas>
+<canvas id="mini" width="60" height="60"></canvas>
+<span id="per">0</span>%<br>
+<progress id="progress" min="0" max="100" value="0"></progress>
+<div id="palette"></div>
+</div>
+</body>
+</html>
